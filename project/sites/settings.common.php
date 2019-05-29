@@ -30,7 +30,7 @@ $databases['default']['default'] = array (
 // Load environment specific settings.
 // Using docker environment by default, but can change this depending upon
 // available hosting environment variables.
-if ($drupal_env = getenv('DOCKER_ENV')) {
+if ($drupal_env = getenv('PROJECT_ENV')) {
   if ($drupal_env === 'local') {
     // Local development.
     include __DIR__ . '/settings.common-local.php';

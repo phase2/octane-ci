@@ -1,11 +1,30 @@
 #!/usr/bin/env bash
-# This script is only intended to be run via "fin"
+## Initializes the project.
+## Creates a new project if run for the first time.
+##
+## This script is ONLY intended to be run via "fin init"
+
+set -e
 
 # Initialize stack.
 fin project start
 
-# Run the common init script within the cli container.
-fin exec bin/init.sh "$@"
+# If .octane folder exists, perform new project initialization.
+if [ -e ".octane/generate.sh" ]; then
+  fin exec .octane/generate.sh
+  # Remove .octane folder to prevent new project the next time.
+  rm -rf .octane
+fi
+
+# Build the codebase.
+fin exec bin/make -y
+
+# First time composer installation for Particle/PL.
+if [[ -e "${THEME_PATH}/package.json" ]]; then
+  cd ${THEME_PATH}
+  npm run setup:pl
+  cd -
+fi
 
 # Install initial site.
 fin exec bin/install -y

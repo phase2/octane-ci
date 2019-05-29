@@ -1,7 +1,8 @@
 #!/bin/bash
-# Export config. Performed after doing work and before doing a commit/push.
-# Runs in the web container, NOT the build container.
-# So ONLY use drush commands here, or other tools available in web container.
+## Export config. Performed after doing work and before doing a commit/push.
+##
+## Runs in the web container, NOT the build container.
+## So ONLY use drush commands here, or other tools available in web container.
 #: exec_target = cli
 
 set -e

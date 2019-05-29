@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+## Build the codebase via composer and npm
+##
+## Usage: fin make
+
 # This runs within the CLI container, so all tools are available.
 #: exec_target = cli
 
@@ -32,23 +36,16 @@ fi
 
 if [[ $DO_COMPOSER -eq 1 ]]; then
   printf "$INFO_SLUG Installing composer dependencies...\n"
-  if [[ -e composer.lock && ! -e vendor ]]; then
-    # First time project creation, remove old composer lock file.
-    printf "$INFO_SLUG Clearing previous composer lock...\n"
-    rm -rf composer.lock
-  fi
-  # Install project dependencies from composer.
-  # Uncomment the following command if you want to continue building if patches
-  # fail to apply.
-  #COMPOSER_PROCESS_TIMEOUT=2000 COMPOSER_DISCARD_CHANGES=1 composer install --ansi --no-suggest --profile -vvv
-  #
-  # Uncomment the following command if you want to ABORT building if patches
-  # fail to apply.
+  # Uncomment this to continue build if patch application fails. (And comment out the line below.)
+  # This should only be done for debugging. If patches from dependencies fail to apply, they
+  # can be skipped using the 'patches-ignore' functionality documented here:
+  # https://github.com/cweagans/composer-patches#ignoring-patches
+  # COMPOSER_PROCESS_TIMEOUT=2000 COMPOSER_EXIT_ON_PATCH_FAILURE=0 composer install --ansi --no-suggest
   COMPOSER_PROCESS_TIMEOUT=2000 composer install --ansi --no-suggest
 fi
 
 # Build the theme if it exists.
-if [ -e ${THEME_PATH} ]; then
+if [[ -e "${THEME_PATH}/package.json" ]]; then
   DO_THEME=1
   if [ -z $CONFIRM ]; then
     read -p "Do you want to re-build Theme? [y]/n "

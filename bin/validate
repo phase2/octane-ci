@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Run all the linting tools for the project
-# This runs within the Build/CLI container but before site is built.
-# All tools are available, but there isn't any Drupal site or database.
+## Run all the linting tools for the project
+##
+## Usage: fin validate
+##
+## This runs within the Build/CLI container but before site is built.
+## All tools are available, but there isn't any Drupal site or database.
 #: exec_target = cli
 
 set -e
@@ -11,16 +14,19 @@ if [ -e ~/.profile ]; then
   source ~/.profile
 fi
 
+printf "$INFO_SLUG Checking PHP syntax...\n"
+vendor/bin/parallel-lint --exclude project/themes/*/vendor --exclude project/themes/*/*/*/pattern-lab project
+
 printf "$INFO_SLUG Checking PHP Code style...\n"
 # PHPCS here.
-PHPCS_PATHS="project/profiles project/modules"
+PHPCS_PATHS="project/profiles project/modules project/tests"
 if [ -e ${THEME_PATH}/apps/drupal ]; then
   PHPCS_PATHS="${PHPCS_PATHS} ${THEME_PATH}/apps/drupal"
 fi
 
-vendor/bin/phpcs --config-set installed_paths vendor/drupal/coder/coder_sniffer/
-vendor/bin/phpcs --standard="Drupal,DrupalPractice" \
+vendor/bin/phpcs --standard="project/tests/.phpcs.xml" \
   --colors \
+  --report-full -p \
   --extensions="php,module,inc,install,test,profile,theme" \
   --ignore="*.features.*,*.pages*.inc" \
   ${PHPCS_PATHS}

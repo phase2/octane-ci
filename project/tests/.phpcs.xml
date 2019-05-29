@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="Octane">
+  <description>PHP CodeSniffer configuration Octane-based projects.</description>
+  <file>../</file>
+  <arg name="extensions" value="inc,install,module,php,profile,test,theme"/>
+  <arg value="p" />
+
+  <rule ref="../../vendor/drupal/coder/coder_sniffer/Drupal"></rule>
+  <rule ref="../../vendor/drupal/coder/coder_sniffer/DrupalPractice"></rule>
+
+  <!-- Exclude markdown and txt files. -->
+  <exclude-pattern>*md</exclude-pattern>
+  <exclude-pattern>*txt</exclude-pattern>
+
+  <!-- Exclude 3rd-party libraries located in project -->
+  <exclude-pattern>../sites</exclude-pattern>
+  <exclude-pattern>*/pattern-lab</exclude-pattern>
+  <exclude-pattern>*/node_modules</exclude-pattern>
+  <exclude-pattern>../themes/*/source</exclude-pattern>
+  <exclude-pattern>../themes/*/dist</exclude-pattern>
+  <exclude-pattern>../themes/*/apps/grav</exclude-pattern>
+  <exclude-pattern>../themes/*/apps/pl</exclude-pattern>
+  <exclude-pattern>../themes/*/vendor</exclude-pattern>
+
+</ruleset>

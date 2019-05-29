@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
+## Fix file permissions
 ##
-# Fix File Permissions
-#
-# Some of the file permissions are broken or mis-aligned as a result
-# of the various Docker and filesystem layers.
-#
-# Paths used align with the volume mappings in the docker-compose
-# and build configuration files.
+## Some of the file permissions are broken or mis-aligned as a result
+## of the various Docker and filesystem layers.
+##
+## Paths used align with the volume mappings in the docker-compose
+## and build configuration files.
 ##
 #: exec_target = cli
 
@@ -21,4 +20,8 @@ chmod 755 /var/www/project/sites/default/files
 # issues such as changes to settings across git branches.
 chmod 755 /var/www/project/sites/default
 # Set file ownership for apache user.  Don't fail if user doesn't exist.
-chown -R apache:apache /var/www/project/sites/default/files &>/dev/null || true
+if [ -z $WEB_USER ]; then
+  WEB_USER=`ls -ld /var/www/project/sites/default/files | awk '{print $3}'`
+fi
+chown -R ${WEB_USER}:${WEB_USER} /var/www/project/sites/default/files &>/dev/null || true
+chown -R ${WEB_USER}:${WEB_USER} /var/www/${REL_DOCROOT} &>/dev/null || true

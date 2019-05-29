@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Install the Drupal site.
-# Runs in the web container, so only use drush commands, no other tools.
+## Install the Drupal site.
+##
+## Runs in the web container, so only use drush commands, no other tools.
 #: exec_target = cli
+
+set -e
 
 # Parse comment line arguments
 CONFIRM=''

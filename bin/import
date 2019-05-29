@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Update the site.
-# Runs in the WEB container, NOT the build container.
-# So ONLY use drush commands here, or other tools available in web container.
+## Update the site and import configuration.
+##
+## Usage: fin import
+##
+## Runs in the WEB container, NOT the build container.
+## So ONLY use drush commands here, or other tools available in web container.
 #: exec_target = cli
 
 set -e

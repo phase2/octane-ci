@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Rebuild the site and theme.  Used after doing "git pull" as part of
-# daily workflow.
-# Runs in the Build container, so all tools are available.
+## Rebuild the site and theme.
+##
+## Used after doing "git pull" as part of daily workflow.
+## Runs in the Build container, so all tools are available.
 #: exec_target = cli
 
 set -e
@@ -18,7 +19,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Build composer, build theme, etc.
-bin/build $CONFIRM
+bin/make $CONFIRM
 
 # Run updates, clear cache, etc.
 bin/import $CONFIRM

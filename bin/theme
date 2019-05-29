@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
+## Compile the theme and run browser-sync to watch for changes.
+##
+## Usage: fin theme
 # Causes this script to run inside the docksal cli container.
 #: exec_target = cli
 
-# Compile the theme and run browser-sync to watch for changes.
 cd ${THEME_PATH}
 PARTICLE_PL_HOST="design.$VIRTUAL_HOST" npm start

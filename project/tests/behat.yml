@@ -1,0 +1,38 @@
+default_contexts: &default_contexts
+  drupal: Drupal\DrupalExtension\Context\DrupalContext
+  message: Drupal\DrupalExtension\Context\MessageContext
+  mink: Drupal\DrupalExtension\Context\MinkContext
+  markup: Drupal\DrupalExtension\Context\MarkupContext
+
+  # Place custom context classes in `project/tests/contexts`, and either add
+  # them to the default contexts above, or per test suite below.
+
+default:
+
+  autoload:
+    - %paths.base%/contexts
+
+  suites:
+    # Suites are used to organize tests. Below is an `example` suite, but this
+    # should be removed, and then project-specific suites grouped by functional
+    # area should be added. Contexts not needed for _all_ suites should be added
+    # here instead of to the default_contexts above.
+    examples:
+      paths: [%paths.base%/features/examples]
+      contexts:
+        <<: *default_contexts
+        example: ExampleContext
+
+  extensions:
+    Drupal\MinkExtension:
+      # The `base_url` parameter is not specified here so it can specified via environment variables. For local dev,
+      # this can also be set in a `behat.local.yml` file that then includes this file.
+      goutte: ~
+      default_session: 'goutte'
+      # @todo Setup selenium (should use same settings as JS existing site.)
+      selenium2: { }
+      javascript_session: 'selenium2'
+
+    Drupal\DrupalExtension:
+      blackbox: ~
+      api_driver: 'drupal'

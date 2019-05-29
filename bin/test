@@ -1,53 +1,101 @@
 #!/usr/bin/env bash
-# Run tests for project.
-# This is for functional/behavior tests that run after the site is installed.
-# This is run within the Build/CLI container, so has all the tools.
+## Run tests for project.
+##
+## This is for functional/behavior tests that run after the site is installed.
+## This is run within the Build/CLI container, so has all the tools.
 #: exec_target = cli
 
 set -e
+
+# Allow for usage outside of containers for unit tests.
+if [[ -z "$PROJECT_ROOT" ]]; then
+  # Logic via https://stackoverflow.com/a/246128.
+  PROJECT_ROOT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )/.."
+fi
+
+SUDO=""
+# Determine the web user.  PHPUnit must run as this user to access the files.
+if [ -e ${PROJECT_ROOT}/${REL_DOCROOT}/sites/default/files ]; then
+  if [ -z $WEB_USER ]; then
+    WEB_USER=`ls -ld ${PROJECT_ROOT}/${REL_DOCROOT}/sites/default/files | awk '{print $3}'`
+  fi
+  SUDO="sudo -u ${WEB_USER} -E "
+  case $WEB_USER in
+    ''|*[0-9]*) SUDO="sudo -u #${WEB_USER} -E " ;;
+  esac
+fi
+# Define default test commands.
+PHPUNIT_COMMAND="${SUDO}${PROJECT_ROOT}/vendor/bin/phpunit -c ${PROJECT_ROOT}/project/tests/phpunit.xml --printer \\Drupal\\Tests\\Listeners\\HtmlOutputPrinter"
+
+BEHAT_COMMAND="${PROJECT_ROOT}/vendor/bin/behat -c ${PROJECT_ROOT}/project/tests/behat.yml -fprogress"
 
 # Init the tools like npm within the cli container
 if [ -e ~/.profile ]; then
   source ~/.profile
 fi
 
-# Check to see if Drupal is already installed.
-DRUPAL_BOOTSTRAP=`drush status --fields=bootstrap 2> /dev/null`
-if [ -z "$DRUPAL_BOOTSTRAP" ]; then
-  # No Drupal db, so use sqlite for test.
-  export SIMPLETEST_DB="sqlite://localhost//tmp/db.sqlite"
-elif [[ ! -z "$MYSQL_USER" && -z "$SIMPLETEST_DB" ]]; then
-  export SIMPLETEST_DB="mysql://${MYSQL_USER:-user}:${MYSQL_PASSWORD:-user}@${MYSQL_HOST:-db}/${MYSQL_DATABASE:-default}"
+# Set DB for testing.  Using SQLite to avoid installing simpletest.
+# SQLite DB must be in files folder to be shared between containers.
+# For kernel tests, this directory doesn't exist, so it uses the default
+# set in phpunit.xml.
+SQLITE_PATH="${PROJECT_ROOT}/${REL_DOCROOT}/sites/default/files"
+if [ -w  "${SQLITE_PATH}" ]; then
+  export SIMPLETEST_DB="sqlite://localhost//${SQLITE_PATH}/db.sqlite"
 fi
 
 # Set default testing URL for web host.
-if [[ ! -z "$VIRTUAL_HOST" && -z "$SIMPLETEST_BASE_URL" ]]; then
-  export SIMPLETEST_BASE_URL=http://${VIRTUAL_HOST}
-elif [[ -z "$SIMPLETEST_BASE_URL" ]]; then
+if [[ ! -z "$CI" && -z "$SIMPLETEST_BASE_URL" ]]; then
   export SIMPLETEST_BASE_URL=http://localhost
+elif [[ ! -z "${VIRTUAL_HOST}" ]]; then
+  # Use the virtual host if available so debugging urls resolve locally instead of to 'web'.
+  export SIMPLETEST_BASE_URL="http://${VIRTUAL_HOST}"
+elif [[ -z "$SIMPLETEST_BASE_URL" ]]; then
+  # Fallback to 'web' if for whatever reason this isn't Docksal or CI.
+  export SIMPLETEST_BASE_URL=http://web
 fi
 # Set default ExistingSite test URL for web host.
 if [[ -z "$DTT_BASE_URL" ]]; then
   export DTT_BASE_URL=${SIMPLETEST_BASE_URL}
 fi
 
+if [[ -z "$BEHAT_PARAMS" ]]; then
+  export BEHAT_PARAMS='{"extensions" : {"Drupal\\MinkExtension" : {"base_url" : "'${DTT_BASE_URL}'"}, "Drupal\\DrupalExtension" : {"drupal" : {"drupal_root" : "'${PROJECT_ROOT}'/'${REL_DOCROOT}'"}}}}'
+fi
+
+# This folder is hard-coded in core for ExistingSite tests, be sure it exists.
+SIMPLETEST_OUTPUT=${PROJECT_ROOT}/${REL_DOCROOT}/sites/simpletest
+if [[ ! -e $SIMPLETEST_OUTPUT ]]; then
+  mkdir -p ${SIMPLETEST_OUTPUT}/browser_output
+fi
+chmod -R 775 $SIMPLETEST_OUTPUT
+chown -R $WEB_USER:$WEB_USER $SIMPLETEST_OUTPUT
+
 if [[ ! -z "$1" && -z "$2" ]]; then
   # Single argument is testsuite.
   printf "$INFO_SLUG Running $1 tests...\n"
-  composer test -- --testsuite $1
+  if [[ "$1" == "behat" ]]; then
+    # Run Behat.
+    $BEHAT_COMMAND
+  else
+    $PHPUNIT_COMMAND --testsuite $1
+  fi
+elif [[ ! -z "$2" && "$1" == "behat" ]]; then
+  # Multiple arguments for behat.
+  printf "$INFO_SLUG Running Behat tests...\n"
+  $BEHAT_COMMAND ${@:2}
 elif [ ! -z "$2" ]; then
   # Multiple arguments, pass to phpunit.
   printf "$INFO_SLUG Running tests...\n"
-  composer test -- $@
+  $PHPUNIT_COMMAND $@
 else
-  # Run all non-unit tests.
-  # Unit tests are run in a separate job before the build is deployed.
-  printf "$INFO_SLUG Running Kernel tests...\n"
-  composer test -- --testsuite kernel
-  printf "$INFO_SLUG Running Functional tests...\n"
-  composer test -- --testsuite functional
-  printf "$INFO_SLUG Running Functional-Javascript tests...\n"
-  composer test -- --testsuite functional-javascript
-  printf "$INFO_SLUG Running ExistingSite tests...\n"
-  composer test -- --testsuite existing-site
+  # Run functional and JS functional tests. Kernel and unit tests are run in an
+  # earlier step in the CI environment.
+  printf "$INFO_SLUG Preparing to run existing-site and functional tests...\n\n"
+  $PHPUNIT_COMMAND --testsuite existing-site,functional,functional-javascript
+
+  if [[ -e ${PROJECT_ROOT}/project/tests/behat.yml ]]; then
+    # Run all Behat tests
+    printf "$INFO_SLUG Running Behat tests...\n"
+    $BEHAT_COMMAND
+  fi
 fi

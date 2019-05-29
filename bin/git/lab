@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Wrapper around the https://github.com/zaquestion/lab GitLab CLI
+# Uses the phase2/lab docker container
+
+set -e
+
+GITDIR=$(git rev-parse --show-toplevel)
+if [ -z ${GITDIR} ]; then
+  echo "Cannot find a git repository"
+  exit 1
+fi
+
+LAB="docker run -it --rm -v ${HOME}:/root -v ${GITDIR}:/home/git outrigger/lab"
+
+# Init command can be used by other scripts to ensure access is set up first.
+# Doing access testing here allows calling scripts to fail more gracefully.
+if [ $1 == "init" ]; then
+  if [ ! -e ~/.config/lab.hcl ]; then
+    # Setup Gitlab access token if this is the first time using.
+    # Need the || statement to prevent failing from aborting script.
+    $LAB version || true
+  fi
+
+  # See if the access actually works.
+  labVersion=$($LAB version || true)
+  if [[ "$labVersion" == *"Unauthorized"* ]]; then
+    echo "GitLab access not granted, verify the correct personal token was entered."
+    # Remove bad GitLab token file that was created.
+    rm -f ~/.config/lab.hcl
+    exit 1
+  fi
+
+else
+  $LAB "$@"
+fi
+

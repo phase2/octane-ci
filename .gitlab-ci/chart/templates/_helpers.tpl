@@ -8,7 +8,7 @@ things marked as stage: deploy
 .Release.name comes from the value given to the helm upgrade command. It typically
 looks something like project-qa (ie, $PROJECT_NAME-$PROJECT_ENV).
 
-See .gitlab-ci.yml for the helm command in .deploy_script for how this is being
+See .gitlab-ci.yml for the helm command in bin/deploy.sh for how this is being
 constructed
 */}}
 {{/*
@@ -21,10 +21,10 @@ Expand the name of the chart.
 {{/*
 Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
+Removed the nameOverride here since Release.Name already contains environment.
 */}}
 {{- define "chart.fullname" -}}
-{{- $name := default .Chart.Name .Values.nameOverride -}}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" -}}
+{{- .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
@@ -49,4 +49,3 @@ Create a URL base for all project services
 {{- define "chart.project.url.base" -}}
 {{- printf "%s.%s.kube.p2devcloud.com" .Values.ingress.url.env .Values.ingress.url.project -}}
 {{- end -}}
-

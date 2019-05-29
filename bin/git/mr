@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+## Used for wunderflow to create two MRs at the same time to two different
+## mainline branches.  Set the branch names in the .env file for project.
+## Issue number taken from current feature/* branch.
+## Usage: mr [Description]
+
+set -e
+
+# Read environment variables from .env file, skipping comments.
+export $(grep -v '^#' .env | xargs)
+
+# Run the lab init script to verify access.
+dirName=`dirname "$0"`
+$dirName/lab init
+
+# Get MR summary from command line arguments by default.
+varDesc="$@"
+if [ -z "${varDesc}" ]; then
+  read -p "Merge Request summary?  " varDesc
+  if [ -z "${varDesc}" ]; then
+    echo "No summary given, aborting."
+    exit 1
+  fi
+fi
+
+if [ ! -z ${JIRA_NAME} ]; then
+  JIRA_NAME="${JIRA_NAME}-"
+fi
+
+FEATURE_BRANCH="$(git symbolic-ref HEAD 2>/dev/null)"
+ISSUE_NUM="${FEATURE_BRANCH//[!0-9]/}"
+if [ -z "$ISSUE_NUM" ]; then
+  ISSUE_NUM="NT"
+  JIRA_NAME=""
+fi
+
+MASTER_BRANCH=${MASTER_BRANCH:-master}
+DEVELOP_BRANCH=${DEVELOP_BRANCH:-develop}
+MASTER_UPPER=$(echo ${MASTER_BRANCH} | tr '[:lower:]' '[:upper:]')
+DEVELOP_UPPER=$(echo ${DEVELOP_BRANCH} | tr '[:lower:]' '[:upper:]')
+
+echo "Creating MR for $DEVELOP_UPPER..."
+$dirName/lab mr create origin $DEVELOP_BRANCH -l $DEVELOP_UPPER -m "$DEVELOP_UPPER : $JIRA_NAME$ISSUE_NUM : $varDesc"
+echo "Creating MR for $MASTER_UPPER..."
+$dirName/lab mr create origin $MASTER_BRANCH -l $MASTER_UPPER -m "$MASTER_UPPER : $JIRA_NAME$ISSUE_NUM : $varDesc"
+
+

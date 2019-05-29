@@ -9,12 +9,12 @@ variables:
   # PROJECT_NAME is ideally set in the CI/CD variables instead of declared here
   # PROJECT_NAME: PUT_PROJECT_NAME_HERE
 
-  # KUBE_NAMESPACE is ideally set in the CI/CD variables instead of declared here
+  # KUBE_NAMESPACE is set in the CI/CD variables instead of declared here
   # Normally PROJECT_NAME-project
   # KUBE_NAMESPACE: PUT_NAMESPACE_HERE
 
-  # CI_REGISTRY_IMAGE isn't used directly to structurally allow for projects with
-  # multiple images which may need to be built. However, the majority are
+  # CI_REGISTRY_IMAGE isn't used directly to structurally allow for projects
+  # with multiple images which may need to be built. However, the majority are
   # expected to only ever need to build one image.
   WEB_IMAGE: ${CI_REGISTRY_IMAGE}/web
 
@@ -26,6 +26,11 @@ variables:
   # If you need this to be different, you'll need to create additional jobs
   # specific to each different environment.
   PROJECT_ENV: ${CI_COMMIT_REF_SLUG}
+
+  # Specify the name of the main branch to use as starting cache for building
+  # feature branches
+  # MAIN_BRANCH: qa
+  MAIN_BRANCH: master
 
 stages:
   # tasks are intended for items which are only run manually and don't need
@@ -39,14 +44,15 @@ stages:
   - update
   - test
   - notify
+  - cleanup
 
 before_script:
-  # Dump some debugging so we know what variables and values we have to work with.
+  # Dump environment so we know what variables and values we have to work with.
   - set
   # Sanity check to make sure the project is configured.
-  - ./.gitlab-ci/check-settings.sh
+  - ./.gitlab-ci/bin/check-settings.sh
   # Ensure DOCKER_HOST is set in runner.
-  - source ./.gitlab-ci/check-docker.sh
+  - source ./.gitlab-ci/bin/check-docker.sh
   # Define project-specific environment variables.
   - source .env
 
@@ -55,105 +61,66 @@ before_script:
 build:
   stage: build
   script:
-    # Login so we can push images to the registry
-    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
-    # assemble the codebase
-    - docker-compose -f .gitlab-ci/build.yml run --rm base ./bin/init.sh -y
-    # bundle it into a docker image
-    - cp .gitlab-ci/Dockerfile Dockerfile
-    # Use previous build as cache for performance.
-    - docker build --cache-from ${WEB_IMAGE}:${CI_COMMIT_REF_SLUG} -t ${WEB_IMAGE}:${CI_COMMIT_SHA} .
-    # Tag it based on slug (branch name) too which can allow for easier commands
-    # of the form "deploy the latest version of BRANCH"
-    - docker tag ${WEB_IMAGE}:${CI_COMMIT_SHA} ${WEB_IMAGE}:${CI_COMMIT_REF_SLUG}
-    # Push all the plain tags and the qa variants and for cache
-    - docker push ${WEB_IMAGE}:${CI_COMMIT_SHA}
-    - docker push ${WEB_IMAGE}:${CI_COMMIT_REF_SLUG}
-    # - ./.gitlab-ci/flowdock-notify.sh "Build of ${CI_COMMIT_REF_NAME} complete for ${CI_COMMIT_TITLE}"
+    # Call common deploy script.  Should not need to modify.
+    - .gitlab-ci/bin/build.sh
+    # Add any post-build commands here, such as flowdock notifications
+    # - ./.gitlab-ci/bin/flowdock-notify.sh "Build complete for ${CI_COMMIT_TITLE} to ${CI_ENVIRONMENT_URL}"
   cache:
     key: ${PROJECT_NAME}-${CI_COMMIT_REF_SLUG}
     paths:
+      - docroot
       - build
       - vendor
       - project/themes/*/node_modules
   only:
     - /^qa/
     - /^test/
+    - /^develop/
+    - /^master/
 
 # Run validation (linting) and unit tests on already built codebase.
 validate:
   stage: validate
   script:
     - docker-compose -f .gitlab-ci/build.yml run --rm base ./bin/validate
-    - docker-compose -f .gitlab-ci/build.yml run --rm base ./bin/test unit
+    - docker-compose -f .gitlab-ci/build.yml run --rm base ./bin/test unit,kernel
   cache:
     key: ${PROJECT_NAME}-${CI_COMMIT_REF_SLUG}
     paths:
+      - docroot
       - build
       - vendor
       - project/themes/*/node_modules
   only:
     - /^qa/
     - /^test/
+    - /^develop/
+    - /^master/
 
 # Runs when a feature/* branch is commited/pushed.
 # Doesn't create any environment, so just build, lint, and unit test.
-validate_branch:
+validate_feature:
   stage: validate
   script:
     # assemble the codebase
-    - docker-compose -f .gitlab-ci/build.yml run --rm base ./bin/init.sh -y
+    - docker-compose -f .gitlab-ci/build.yml run --rm base ./bin/make -y
     # Run linting etc.
     - docker-compose -f .gitlab-ci/build.yml run --rm base ./bin/validate
     # Run unit tests.
-    - docker-compose -f .gitlab-ci/build.yml run --rm base ./bin/test unit
+    - docker-compose -f .gitlab-ci/build.yml run --rm base ./bin/test unit,kernel
   cache:
-    # Pull the cache from the "test" branch.
-    key: ${PROJECT_NAME}-test
+    # Pull the cache from the main branch.
+    # Speeds up feature branch build so not starting from scratch.
+    key: ${PROJECT_NAME}-${MAIN_BRANCH}
     # Prevent cache from being updated/pushed.
     policy: pull
     paths:
+      - docroot
       - build
       - vendor
       - project/themes/*/node_modules
   only:
     - /^feature/
-
-# Common script to deploy a built image to a Kubernetes cluster.
-# When calling this script, be sure to set the "environment:" values.
-.deploy_script: &deploy_script
-  script:
-    # Display versions of docker, etc. Comes from gitlab-ci-workspace container.
-    - /versions.sh
-    # Remove any previous manifests from cache.
-    - rm -rf .gitlab-ci/manifests
-    - mkdir .gitlab-ci/manifests
-    # Create a Docker Registry secret (if it doesn't exist) so we can pull images
-    # via imagePullSecrets. This depends on a deploy token having been created
-    # with name gitlab-deploy-token. See the note about the special naming at
-    # https://gitlab.com/help/user/project/deploy_tokens/index#read-container-registry-images
-    - kubectl get secret gitlab-registry-secret || kubectl create secret docker-registry gitlab-registry-secret --docker-server=${CI_REGISTRY} --docker-username=${CI_DEPLOY_USER} --docker-password=${CI_DEPLOY_PASSWORD} --docker-email=${GITLAB_USER_EMAIL}
-    # Download chart dependencies.
-    - helm dependency build .gitlab-ci/chart
-    # Do the deployment and output all the YAML resources deployed for this release.
-    - helm version
-    # Create env configMap from .env file.
-    #   Remove the quotes around values since kubectl expects simple key=value
-    - cat .env | tr -d "\"" >.gitlab-ci/.env
-    - kubectl create configmap ${RELEASE_NAME}-${CI_ENVIRONMENT_SLUG}-env-config --from-env-file=.gitlab-ci/.env -o yaml --dry-run > .gitlab-ci/manifests/${RELEASE_NAME}-${CI_ENVIRONMENT_SLUG}-env-config.yaml
-    # Create additional values from environment.
-    - .gitlab-ci/env-values.sh > .gitlab-ci/env-values.yaml
-    # Generate the manifests from the chart templates.
-    - helm template -f .gitlab-ci/env-values.yaml --output-dir .gitlab-ci/manifests --name ${RELEASE_NAME} --set nameOverride=${CI_ENVIRONMENT_SLUG} --set image.repository=${WEB_IMAGE} --set image.tag=${CI_COMMIT_SHA} --set env.tier=${PROJECT_ENV} --set build_id="build-${CI_JOB_ID}" --set ingress.url.env=${PROJECT_ENV} --set ingress.url.project=${PROJECT_NAME} --debug .gitlab-ci/chart
-    # Remove un-needed mariadb-test pod.
-    - rm -f .gitlab-ci/manifests/chart/charts/mariadb/templates/test-runner.yaml
-    - rm -f .gitlab-ci/manifests/chart/charts/mariadb/templates/tests.yaml
-    # Send helm manifests to kubectl to create/update the pods.
-    - kubectl apply --recursive --filename .gitlab-ci/manifests
-    # Wait for pods to become available.
-    - .gitlab-ci/wait-until-pods-ready.sh ${KUBE_NAMESPACE}
-    # Add any post-deploy commands here, such as flowdock notifications
-    # - ./.gitlab-ci/flowdock-notify.sh "Deployment complete for ${CI_COMMIT_TITLE} to ${CI_ENVIRONMENT_URL}"
 
 # Deploy the a branch to an environment.
 # Use this job if your branch names match your environment names.
@@ -166,14 +133,68 @@ deploy:
     # Also cannot use $PROJECT_ENV since GitLab doesn't support vars in vars.
     name: ${CI_COMMIT_REF_SLUG}
     url: http://www.${CI_COMMIT_REF_SLUG}.${PROJECT_NAME}.kube.p2devcloud.com
-  <<: *deploy_script
-  cache:
-    key: ${PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-manifest
+    on_stop: x_destroy_env
+  script:
+    # Call common deploy script.  Should not need to modify.
+    - .gitlab-ci/bin/deploy.sh
+    # Add any post-deploy commands here, such as flowdock notifications
+    # - ./.gitlab-ci/bin/flowdock-notify.sh "Deployment complete for ${CI_COMMIT_TITLE} to ${CI_ENVIRONMENT_URL}"
+  artifacts:
+    # Save the manifests from the deployment so it can be deleted later.
+    name: ${PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-manifests
+    # Don't expire these since normal environments might be long running.
     paths:
       - .gitlab-ci/manifests
   only:
     - /^qa/
     - /^test/
+    - /^develop/
+    - /^master/
+
+# Install and test a feature branch manually.
+deploy_feature:
+  stage: deploy
+  variables:
+    PROJECT_ENV: feature-${CI_COMMIT_SHORT_SHA}
+    RELEASE_NAME: ${PROJECT_NAME}-feature-${CI_COMMIT_SHORT_SHA}
+  environment:
+    # Cannot use environment variables here, only gitlab variables.
+    # Also cannot use $PROJECT_ENV since GitLab doesn't support vars in vars.
+    name: feature-${CI_COMMIT_SHORT_SHA}
+    url: http://www.feature-${CI_COMMIT_SHORT_SHA}.${PROJECT_NAME}.kube.p2devcloud.com
+    on_stop: x_destroy_feature
+  script:
+    # Call common deploy script.  Should not need to modify.
+    # Skips the octane setup since already done in main branch cache.
+    - .gitlab-ci/bin/build.sh -skip
+    # Call common deploy script.  Should not need to modify.
+    - .gitlab-ci/bin/deploy.sh
+    # Fresh install for feature branches being tested.
+    - ./.gitlab-ci/bin/exec.sh cli /var/www/bin/install -y
+    - ./.gitlab-ci/bin/exec.sh cli /var/www/bin/test
+  artifacts:
+    # Save the manifests from the deployment so it can be deleted later.
+    name: ${PROJECT_NAME}-feature-${CI_COMMIT_SHORT_SHA}-manifests
+    # Expire these since feature-branch environments are not long-lived.
+    expire_in: 1 week
+    paths:
+      - .gitlab-ci/manifests
+  cache:
+    # Pull the cache from the main branch.
+    # Speeds up feature branch build so not starting from scratch.
+    key: ${PROJECT_NAME}-${MAIN_BRANCH}
+    # Prevent cache from being updated/pushed.
+    policy: pull
+    paths:
+      - docroot
+      - build
+      - vendor
+      - project/themes/*/node_modules
+  only:
+    # Set the branch for the environment here.
+    - /^feature/
+  allow_failure: true
+  when: manual
 
 # Deploy the an environment with a different branch name.
 # Use this job if your want a different environment name for a branch.
@@ -191,7 +212,9 @@ deploy:
 #     # Cannot use environment variables here, only gitlab variables.
 #     name: ${PROJECT_ENV}
 #     url: http://www.${PROJECT_ENV}.${PROJECT_NAME}.kube.p2devcloud.com
-#   <<: *deploy_script
+#   script:
+#     # Call common deploy script.  Should not need to modify.
+#     - .gitlab-ci/bin/deploy.sh
 #   cache:
 #     key: ${PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-manifest
 #     paths:
@@ -199,7 +222,6 @@ deploy:
 #   only:
 #     # Set the branch for the environment here.
 #     - /^BRANCH/
-
 
 # Update the environment.
 # Installs Drupal if needed, runs update hooks, config-import, clear-cache.
@@ -212,12 +234,13 @@ update:
     url: http://www.${CI_COMMIT_REF_SLUG}.${PROJECT_NAME}.kube.p2devcloud.com
   script:
     # Useful debugging to see if drush is happy.
-    - ./.gitlab-ci/exec.sh cli ls -al
-    - ./.gitlab-ci/exec.sh cli drush status
-    - ./.gitlab-ci/exec.sh cli /var/www/bin/import -y
+    - ./.gitlab-ci/bin/exec.sh cli drush status
+    - ./.gitlab-ci/bin/exec.sh cli /var/www/bin/import -y
   only:
     - /^qa/
     - /^test/
+    - /^develop/
+    - /^master/
 
 # Run full test suite that needs the running environment.
 test:
@@ -225,10 +248,12 @@ test:
   environment:
     name: ${CI_COMMIT_REF_SLUG}
   script:
-    - ./.gitlab-ci/exec.sh cli /var/www/bin/test
+    - ./.gitlab-ci/bin/exec.sh cli /var/www/bin/test
   only:
     - /^qa/
     - /^test/
+    - /^develop/
+    - /^master/
 
 # Manual task to reinstall Drupal when needed.
 install:
@@ -236,31 +261,66 @@ install:
   environment:
     name: ${CI_COMMIT_REF_SLUG}
   script:
-    - ./.gitlab-ci/exec.sh cli /var/www/bin/install -y
+    - ./.gitlab-ci/bin/exec.sh cli /var/www/bin/install -y
   only:
     - /^qa/
     - /^test/
+    - /^develop/
+    - /^master/
   when: manual
 
 # Purge the Kubernetes environment manually when needed.
-clean_up:
-  stage: tasks
+# Set up as the stop action for deploy job, so stage needs to be deploy.
+x_destroy_env:
+  stage: cleanup
+  variables:
+    # Tells Gitlab not to bother doing a git-pull for this job.
+    GIT_STRATEGY: none
   environment:
     # Cannot use environment variables here, only gitlab variables.
     # Also cannot use $PROJECT_ENV since GitLab doesn't support vars in vars.
     name: ${CI_COMMIT_REF_SLUG}
     url: http://www.${CI_COMMIT_REF_SLUG}.${PROJECT_NAME}.kube.p2devcloud.com
+    action: stop
   script:
-    - ls -al .gitlab-ci
     # Remove everything that was deployed for this environment.
     - kubectl delete --recursive --filename .gitlab-ci/manifests
-  cache:
-    key: ${PROJECT_NAME}-${CI_COMMIT_REF_SLUG}-manifest
-    paths:
-      - .gitlab-ci/manifests
+  dependencies:
+    # Bring in the manifest artifact
+    - deploy
   only:
     - /^qa/
     - /^test/
+    - /^develop/
+    - /^master/
+  allow_failure: true
+  when: manual
+
+# Purge the feature branch Kubernetes environment manually when needed.
+# Set up as the stop action for feature_test job, so stage needs to be deploy.
+x_destroy_feature:
+  stage: cleanup
+  variables:
+    # Tells Gitlab not to bother doing a git-pull for this job.
+    GIT_STRATEGY: none
+  variables:
+    PROJECT_ENV: feature-${CI_COMMIT_SHORT_SHA}
+    RELEASE_NAME: ${PROJECT_NAME}-feature-${CI_COMMIT_SHORT_SHA}
+  environment:
+    # Cannot use environment variables here, only gitlab variables.
+    # Also cannot use $PROJECT_ENV since GitLab doesn't support vars in vars.
+    name: feature-${CI_COMMIT_SHORT_SHA}
+    url: http://www.feature-${CI_COMMIT_SHORT_SHA}.${PROJECT_NAME}.kube.p2devcloud.com
+    action: stop
+  script:
+    # Remove everything that was deployed for this environment.
+    - kubectl delete --recursive --filename .gitlab-ci/manifests
+  dependencies:
+    # Bring in the manifest artifact
+    - deploy_feature
+  only:
+    - /^feature/
+  allow_failure: true
   when: manual
 
 # Notify when pipeline succeeds.
@@ -268,29 +328,33 @@ success:
   stage: notify
   script:
     # Notify Flowdock that pipeline finished successfully.
-    - ./.gitlab-ci/flowdock-notify.sh ":green_heart:Deployment successful for [${CI_COMMIT_SHORT_SHA}](${CI_PIPELINE_URL}) ${CI_COMMIT_TITLE} to ${PROJECT_ENV}"
+    - ./.gitlab-ci/bin/flowdock-notify.sh ":green_heart:Deployment successful for [${CI_COMMIT_SHORT_SHA}](${CI_PIPELINE_URL}) ${CI_COMMIT_TITLE} to ${PROJECT_ENV}"
   when: on_success
   only:
     - /^qa/
     - /^test/
+    - /^develop/
+    - /^master/
 
 # Notify when main pipeline branches fails.
 failure:
   stage: notify
   script:
     # Send failure notification to main Flow with emoji.
-    - ./.gitlab-ci/flowdock-notify.sh ":broken_heart:Deployment failed for [${CI_COMMIT_SHORT_SHA}](${CI_PIPELINE_URL}) ${CI_COMMIT_TITLE} to ${PROJECT_ENV}"
+    - ./.gitlab-ci/bin/flowdock-notify.sh ":broken_heart:Deployment failed for [${CI_COMMIT_SHORT_SHA}](${CI_PIPELINE_URL}) ${CI_COMMIT_TITLE} to ${PROJECT_ENV}"
   when: on_failure
   only:
     - /^qa/
     - /^test/
+    - /^develop/
+    - /^master/
 
 # Notify when feature branches succeeds.
 success_branch:
   stage: notify
   script:
     # Send failure notification to flow inbox (no emoji allowed :( ).
-    - ./.gitlab-ci/flowdock-notify.sh inbox "Deployment PASSSED to ${PROJECT_ENV}" "for <a href="${CI_PIPELINE_URL}">${CI_COMMIT_SHORT_SHA}</a> ${CI_COMMIT_TITLE}"
+    - ./.gitlab-ci/bin/flowdock-notify.sh inbox "Deployment PASSED to ${PROJECT_ENV}" "for <a href="${CI_PIPELINE_URL}">${CI_COMMIT_SHORT_SHA}</a> ${CI_COMMIT_TITLE}"
   when: on_success
   only:
     - /^feature/
@@ -300,7 +364,7 @@ failure_branch:
   stage: notify
   script:
     # Send failure notification to flow inbox (no emoji allowed :( ).
-    - ./.gitlab-ci/flowdock-notify.sh inbox "Deployment failed to ${PROJECT_ENV}" "for <a href="${CI_PIPELINE_URL}">${CI_COMMIT_SHORT_SHA}</a> ${CI_COMMIT_TITLE}"
+    - ./.gitlab-ci/bin/flowdock-notify.sh inbox "Deployment failed to ${PROJECT_ENV}" "for <a href="${CI_PIPELINE_URL}">${CI_COMMIT_SHORT_SHA}</a> ${CI_COMMIT_TITLE}"
   when: on_failure
   only:
     - /^feature/

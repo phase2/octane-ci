@@ -41,10 +41,10 @@ class FrontPageTest extends OctaneExistingSiteTestBase {
   public function setUp() {
     parent::setUp();
 
-    // Typically a user is created with no arguments and a role is assigned later.
-    // This differs from the other phpunit test types where roles are unimportant,
-    // but permissions are. Since this is just an authenticated user, no special
-    // permissions or roles are assigned.
+    // Typically a user is created with no arguments and a role is assigned
+    // later. This differs from the other phpunit test types where roles are
+    // unimportant, but permissions are. Since this is just an authenticated
+    // user, no special permissions or roles are assigned.
     //
     // Users (and nodes and terms) created this way are automatically removed
     // in the `tearDown` method. See the parent classes for more details.
