@@ -6,7 +6,7 @@
 
 usage() {
   echo "Usage:"
-  echo "fin php-ext <extension name> on|off"
+  echo "fin php-ext <extension name> [on|off]"
 }
 
 toggle_on() {
@@ -31,7 +31,15 @@ find_extension() {
   fi
 }
 
-if [[ -z ${2} ]]; then
+report_status() {
+  if php -m | grep -q ${EXTENSION}; then
+    echo "${EXTENSION} is on"
+  else
+    echo "${EXTENSION} is off"
+  fi
+}
+
+if [[ -z ${1} ]]; then
   usage
   exit 1
 fi
@@ -40,13 +48,17 @@ fi
 EXTENSION=${1}
 find_extension
 
-if [[ "${2}" == "on" ]]; then
+if [[ "${2}" == "" ]]; then
+  report_status
+elif [[ "${2}" == "on" ]]; then
   toggle_on
+restart_php_fpm
 elif [[ "${2}" == "off" ]]; then
   toggle_off
+restart_php_fpm
 else
   echo "Unknown option: ${2}"
   exit 1
 fi
 
-restart_php_fpm
+
