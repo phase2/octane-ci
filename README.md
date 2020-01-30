@@ -1,3 +1,6 @@
+# NOTE
+This repo is currently out of date and should not be used. Development of Octane-CI is being done within the private Phase2 GitLab repository.  This public repo will be updated in the future.
+
 # Octane
 This is a composer project used to spin up a starting instance of Drupal 8 Octane.
 Octane is a Drupal 8 project scaffold that provides the following features:
